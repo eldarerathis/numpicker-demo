@@ -421,6 +421,12 @@ public class NumberPicker extends LinearLayout implements OnClickListener,
      * @return the current value.
      */
     public int getCurrent() {
-        return Integer.parseInt(((EditText) findViewById(R.id.timepicker_input)).getText().toString());
+        try {
+            return Integer.parseInt(((EditText) findViewById(R.id.timepicker_input)).getText().toString());
+    	}
+    	catch (NumberFormatException fEx) {
+    	    //Return the minimum value if we can't parse the EditText's value
+    	    return mStart;
+    	}
     }
 }
