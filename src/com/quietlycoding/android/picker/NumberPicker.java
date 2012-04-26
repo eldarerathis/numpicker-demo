@@ -23,7 +23,6 @@ import android.text.InputType;
 import android.text.Spanned;
 import android.text.method.NumberKeyListener;
 import android.util.AttributeSet;
-import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.View.OnClickListener;
@@ -37,40 +36,33 @@ import android.widget.EditText;
  * This class has been pulled from the Android platform source code, its an internal widget that hasn't been
  * made public so its included in the project in this fashion for use with the preferences screen; I have made
  * a few slight modifications to the code here, I simply put a MAX and MIN default in the code but these values
- * can still be set publically by calling code.
+ * can still be set publicly by calling code.
  *
  * @author Google
  */
 public class NumberPicker extends LinearLayout implements OnClickListener,
         OnFocusChangeListener, OnLongClickListener {
 
-    private static final String TAG = "NumberPicker";
-    private static final int DEFAULT_MAX = 200;
-    private static final int DEFAULT_MIN = 0;
+    private static final double DEFAULT_MAX = 10;
+    private static final double DEFAULT_MIN = 1;
 
     public interface OnChangedListener {
-        void onChanged(NumberPicker picker, int oldVal, int newVal);
+        void onChanged(NumberPicker picker, double oldVal, double newVal);
     }
 
     public interface Formatter {
-        String toString(int value);
+        String toString(double value);
     }
 
-    /*
-     * Use a custom NumberPicker formatting callback to use two-digit
-     * minutes strings like "01".  Keeping a static formatter etc. is the
-     * most efficient way to do this; it avoids creating temporary objects
-     * on every call to format().
-     */
-    public static final NumberPicker.Formatter TWO_DIGIT_FORMATTER =
+    private NumberPicker.Formatter mFormatter =
             new NumberPicker.Formatter() {
                 final StringBuilder mBuilder = new StringBuilder();
                 final java.util.Formatter mFmt = new java.util.Formatter(mBuilder);
                 final Object[] mArgs = new Object[1];
-                public String toString(int value) {
+                public String toString(double value) {
                     mArgs[0] = value;
                     mBuilder.delete(0, mBuilder.length());
-                    mFmt.format("%02d", mArgs);
+                    mFmt.format("%." + mPrecision + "f", mArgs);
                     return mFmt.toString();
                 }
         };
@@ -79,25 +71,27 @@ public class NumberPicker extends LinearLayout implements OnClickListener,
     private final Runnable mRunnable = new Runnable() {
         public void run() {
             if (mIncrement) {
-                changeCurrent(mCurrent + 1);
+                changeCurrent(mCurrent + mStep);
                 mHandler.postDelayed(this, mSpeed);
             } else if (mDecrement) {
-                changeCurrent(mCurrent - 1);
+                changeCurrent(mCurrent - mStep);
                 mHandler.postDelayed(this, mSpeed);
             }
         }
     };
+    
+    private double mStep = 1;
+    private double mEpsilon = 0.001; //Set a default
+    private int mPrecision = 0;
 
     private final EditText mText;
     private final InputFilter mNumberInputFilter;
 
-    private String[] mDisplayedValues;
-    protected int mStart;
-    protected int mEnd;
-    protected int mCurrent;
-    protected int mPrevious;
+    protected double mStart;
+    protected double mEnd;
+    protected double mCurrent;
+    protected double mPrevious;
     private OnChangedListener mListener;
-    private Formatter mFormatter;
     private long mSpeed = 300;
 
     private boolean mIncrement;
@@ -111,7 +105,6 @@ public class NumberPicker extends LinearLayout implements OnClickListener,
         this(context, attrs, 0);
     }
 
-    @SuppressWarnings({"UnusedDeclaration"})
     public NumberPicker(Context context, AttributeSet attrs, int defStyle) {
         super(context, attrs);
         setOrientation(VERTICAL);
@@ -167,31 +160,59 @@ public class NumberPicker extends LinearLayout implements OnClickListener,
      */
     public void setRange(int start, int end) {
         mStart = start;
-        mEnd = end;
+        
+        if (end == -1)
+        	mEnd = Double.MAX_VALUE; //-1 indicates no maximum value
+        else
+        	mEnd = end;
+        
         mCurrent = start;
         updateView();
     }
-
-    /**
-     * Set the range of numbers allowed for the number picker. The current
-     * value will be automatically set to the start. Also provide a mapping
-     * for values used to display to the user.
-     *
-     * @param start the start of the range (inclusive)
-     * @param end the end of the range (inclusive)
-     * @param displayedValues the values displayed to the user.
-     */
-    public void setRange(int start, int end, String[] displayedValues) {
-        mDisplayedValues = displayedValues;
-        mStart = start;
-        mEnd = end;
-        mCurrent = start;
-        updateView();
+    
+    public void setRange(double start, double end) {
+    	mStart = start;
+    	
+    	if (Math.abs(end + 1) < mEpsilon)
+    		mEnd = Double.MAX_VALUE; //-1 indicates no maximum value
+    	else
+    		mEnd = end;
+    	
+    	mCurrent = start;
+    	updateView();
     }
 
     public void setCurrent(int current) {
         mCurrent = current;
         updateView();
+    }
+    
+    public void setCurrent(float current)
+    {
+    	mCurrent = current;
+    	updateView();
+    }
+    
+    public void setPrecision(int places)
+    {
+    	if (places <= 0)
+    	{
+    		mEpsilon = 0.001;
+    		mPrecision = 0;
+    	}
+    	else
+    	{
+	    	mEpsilon = 1.0;
+	    	mPrecision = places;
+	    	
+	    	for (int i = 0; i < places; ++i)
+	    		mEpsilon /= 10;
+    	}
+    }
+    
+    public void setStep(double step)
+    {
+    	mStep = step;
     }
 
     /**
@@ -208,19 +229,19 @@ public class NumberPicker extends LinearLayout implements OnClickListener,
 
         // now perform the increment/decrement
         if (R.id.increment == v.getId()) {
-            changeCurrent(mCurrent + 1);
+            changeCurrent(mCurrent + mStep);
         } else if (R.id.decrement == v.getId()) {
-            changeCurrent(mCurrent - 1);
+            changeCurrent(mCurrent - mStep);
         }
     }
 
-    private String formatNumber(int value) {
+    private String formatNumber(double value) {
         return (mFormatter != null)
                 ? mFormatter.toString(value)
                 : String.valueOf(value);
     }
 
-    protected void changeCurrent(int current) {
+    protected void changeCurrent(double current) {
 
         // Wrap around the values if we go past the start or end
         if (current > mEnd) {
@@ -247,18 +268,14 @@ public class NumberPicker extends LinearLayout implements OnClickListener,
          * current number else find the correct value in the
          * displayed values for the current number.
          */
-        if (mDisplayedValues == null) {
-            mText.setText(formatNumber(mCurrent));
-        } else {
-            mText.setText(mDisplayedValues[mCurrent - mStart]);
-        }
+        mText.setText(formatNumber(mCurrent));
         mText.setSelection(mText.getText().length());
     }
 
     private void validateCurrentView(CharSequence str) {
-        int val = getSelectedPos(str.toString());
+        double val = getSelectedPos(str.toString());
         if ((val >= mStart) && (val <= mEnd)) {
-            if (mCurrent != val) {
+            if (Math.abs(mCurrent - val) > mEpsilon) {
                 mPrevious = mCurrent;
                 mCurrent = val;
                 notifyChange();
@@ -320,7 +337,7 @@ public class NumberPicker extends LinearLayout implements OnClickListener,
     }
 
     private static final char[] DIGIT_CHARACTERS = new char[] {
-        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'
+        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.'
     };
 
     private NumberPickerButton mIncrementButton;
@@ -329,21 +346,7 @@ public class NumberPicker extends LinearLayout implements OnClickListener,
     private class NumberPickerInputFilter implements InputFilter {
         public CharSequence filter(CharSequence source, int start, int end,
                 Spanned dest, int dstart, int dend) {
-            if (mDisplayedValues == null) {
-                return mNumberInputFilter.filter(source, start, end, dest, dstart, dend);
-            }
-            CharSequence filtered = String.valueOf(source.subSequence(start, end));
-            String result = String.valueOf(dest.subSequence(0, dstart))
-                    + filtered
-                    + dest.subSequence(dend, dest.length());
-            String str = String.valueOf(result).toLowerCase();
-            for (String val : mDisplayedValues) {
-                val = val.toLowerCase();
-                if (val.startsWith(str)) {
-                    return filtered;
-                }
-            }
-            return "";
+            return mNumberInputFilter.filter(source, start, end, dest, dstart, dend);
         }
     }
 
@@ -376,14 +379,14 @@ public class NumberPicker extends LinearLayout implements OnClickListener,
             if ("".equals(result)) {
                 return result;
             }
-            int val = getSelectedPos(result);
+            double val = getSelectedPos(result);
 
             /* Ensure the user can't type in a value greater
              * than the max allowed. We have to allow less than min
              * as the user might want to delete some numbers
              * and then type a new number.
              */
-            if (val > mEnd) {
+            if (val > mEnd || Math.abs(val - Double.MIN_VALUE) < mEpsilon) {
                 return "";
             } else {
                 return filtered;
@@ -391,42 +394,46 @@ public class NumberPicker extends LinearLayout implements OnClickListener,
         }
     }
 
-    private int getSelectedPos(String str) {
-        if (mDisplayedValues == null) {
-            return Integer.parseInt(str);
-        } else {
-            for (int i = 0; i < mDisplayedValues.length; i++) {
-
-                /* Don't force the user to type in jan when ja will do */
-                str = str.toLowerCase();
-                if (mDisplayedValues[i].toLowerCase().startsWith(str)) {
-                    return mStart + i;
-                }
-            }
-
-            /* The user might have typed in a number into the month field i.e.
-             * 10 instead of OCT so support that too.
-             */
-            try {
-                return Integer.parseInt(str);
-            } catch (NumberFormatException e) {
-
-                /* Ignore as if it's not a number we don't care */
-            }
-        }
-        return mStart;
+    private double getSelectedPos(String str) {
+    	double retVal = Double.MIN_VALUE;
+    	
+    	try
+    	{
+            retVal = Double.parseDouble(str);
+    	}
+    	catch (NumberFormatException fEx)
+    	{
+    		//Invalid number entered, so just ignore it
+    	}
+    	
+    	return retVal;
     }
 
     /**
      * @return the current value.
      */
     public int getCurrent() {
-        try {
-            return Integer.parseInt(((EditText) findViewById(R.id.timepicker_input)).getText().toString());
+    	try
+    	{
+    		return Integer.parseInt(((EditText) findViewById(R.id.timepicker_input)).getText().toString());
     	}
-    	catch (NumberFormatException fEx) {
-    	    //Return the minimum value if we can't parse the EditText's value
-    	    return mStart;
+    	catch (NumberFormatException fEx)
+    	{
+    		//Return the minimum value if we can't parse the EditText's value
+    		return (int)mStart;
+    	}
+    }
+    
+    public double getFloatCurrent()
+    {
+    	try
+    	{
+    		return Double.parseDouble(((EditText) findViewById(R.id.timepicker_input)).getText().toString());
+    	}
+    	catch (NumberFormatException fEx)
+    	{
+    		//Return the minimum value if we can't parse the EditText's value
+    		return mStart;
     	}
     }
 }
